@@ -6,8 +6,9 @@ import (
     "fmt"
     "strconv"
     "strings"
+    "flag"
 
-    // Redis "github.com/fzzy/radix/redis"
+    Redis "github.com/fzzy/radix/redis"
     "github.com/ActiveState/tail"
 )
 
@@ -19,6 +20,12 @@ type CheckResult struct {
     Summary string `json:"summary"`
     Details string `json:"details"`
     Time    int    `json:"time"`
+}
+
+func dieOnError(err error) {
+    if err != nil {
+        log.Fatal(err)
+    }
 }
 
 func parseNagLine(line string) (*CheckResult, error) {
@@ -80,30 +87,51 @@ func followFile(file string, c chan *CheckResult) {
         Follow: true,
     })
     
-    if err != nil {
-        log.Fatal(err);
-    }
-
+    dieOnError(err)
+    
     for line := range tailer.Lines {
         checkResult, err := parseNagLine(line.Text)
         
-        if err != nil {
-            log.Fatal(err);
-        }
-        
+        dieOnError(err)
+                
         c <- checkResult
     }
 }
 
 func main() {
-    // redis, err = Redis.
+    // redis host, port, db
+    // files…
+    redisHost := flag.String("host", "", "redis hostname")
+    redisPort := flag.Int("port", 6379, "redis port")
+    redisDb   := flag.Int("db", 0, "redis database number")
+    
+    flag.Parse()
+    
+    if len(*redisHost) == 0 {
+        log.Fatal("must provide -host");
+    }
+    
+    filenames := flag.Args()
+    if len(filenames) == 0 {
+        log.Fatal("must provide file(s) to follow")
+    }
+
+    redis, err := Redis.Dial("tcp", fmt.Sprintf("%s:%d", *redisHost, *redisPort))
+    dieOnError(err)
+    
+    dieOnError((*redis.Cmd("select", *redisDb)).Err)
     
     checkResultChan := make(chan *CheckResult, 10) // buffered
-    go followFile("/Users/blalor/tmp/host-perfdata.log", checkResultChan)
-    go followFile("/Users/blalor/tmp/service-perfdata.log", checkResultChan)
+    
+    for _, fn := range filenames {
+        log.Printf("following %s", fn)
+        go followFile(fn, checkResultChan)
+    }
     
     for checkResult := range checkResultChan {
-        _json, _ := json.Marshal(checkResult)
-        fmt.Println(string(_json))
+        _json, err := json.Marshal(checkResult)
+        dieOnError(err)
+        
+        dieOnError((*redis.Cmd("lpush", "events", string(_json))).Err)
     }
 }
