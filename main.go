@@ -74,28 +74,35 @@ func parseNagLine(line string) (*CheckResult, error) {
     }, nil;
 }
 
-func followFile(file string) (*tail.Tail, error) {
-    return tail.TailFile("/Users/blalor/tmp/hostPerf.log", tail.Config{
+func followFile(file string, c chan *CheckResult) {
+    tailer, err := tail.TailFile(file, tail.Config{
         ReOpen: true,
         Follow: true,
     })
-}
-
-func main() {
-    // redis, err = Redis.
-
-    hostPerf, err := followFile("/Users/blalor/tmp/hostPerf.log")
+    
     if err != nil {
         log.Fatal(err);
     }
 
-    for line := range hostPerf.Lines {
+    for line := range tailer.Lines {
         checkResult, err := parseNagLine(line.Text)
         
         if err != nil {
             log.Fatal(err);
         }
         
+        c <- checkResult
+    }
+}
+
+func main() {
+    // redis, err = Redis.
+    
+    checkResultChan := make(chan *CheckResult, 10) // buffered
+    go followFile("/Users/blalor/tmp/host-perfdata.log", checkResultChan)
+    go followFile("/Users/blalor/tmp/service-perfdata.log", checkResultChan)
+    
+    for checkResult := range checkResultChan {
         _json, _ := json.Marshal(checkResult)
         fmt.Println(string(_json))
     }
