@@ -5,14 +5,14 @@ set -e -u -x
 _basedir=$( cd -P "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
 # http://stackoverflow.com/a/17537385/53051
-git update-index --refresh
+git update-index --refresh || echo "dirty working copy"
 
 git_desc=$( git describe --dirty --always )
 
 PKG_VER="${git_desc#v}" ## tag should be "va.b.c"
 PKG_ITER="1"
 
-tmpdir=$( mktemp -d )
+tmpdir=$( mktemp -d -t gobuild.XXXXXX )
 trap "echo removing ${tmpdir}; rm -rf ${tmpdir}" EXIT
 
 export GOPATH=${tmpdir}/gopath
