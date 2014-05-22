@@ -7,7 +7,8 @@ import (
     "strconv"
     "strings"
     "flag"
-
+    "os"
+    
     Redis "github.com/fzzy/radix/redis"
     "github.com/ActiveState/tail"
     StatsD "github.com/cactus/go-statsd-client/statsd"
@@ -91,6 +92,9 @@ func followFile(file string, c chan *CheckResult) {
     tailer, err := tail.TailFile(file, tail.Config{
         ReOpen: true,
         Follow: true,
+        
+        // start reading from the end of the file
+        Location: &tail.SeekInfo{ 0, os.SEEK_END },
     })
     
     dieOnError(err)
