@@ -10,8 +10,12 @@ import (
 
     Redis "github.com/fzzy/radix/redis"
     "github.com/ActiveState/tail"
+    StatsD "github.com/cactus/go-statsd-client/statsd"
 )
 
+var statsd StatsD.Statter
+
+// flapjack event structure, a la v0.8.11.
 type CheckResult struct {
     Entity  string `json:"entity"`
     Check   string `json:"check"`
@@ -22,12 +26,14 @@ type CheckResult struct {
     Time    int    `json:"time"`
 }
 
+// explode when things go badly
 func dieOnError(err error) {
     if err != nil {
         log.Fatal(err)
     }
 }
 
+// parses a Nagios perfdata line, per https://github.com/flapjack/flapjack/wiki/USING#configuring-nagios
 func parseNagLine(line string) (*CheckResult, error) {
     lineBits := strings.Split(line, "\t")
 
@@ -92,18 +98,29 @@ func followFile(file string, c chan *CheckResult) {
     for line := range tailer.Lines {
         checkResult, err := parseNagLine(line.Text)
         
-        dieOnError(err)
-                
-        c <- checkResult
+        if err != nil {
+            log.Println(err)
+            statsd.Inc("bad-lines", 1, 1.0)
+        } else {
+            c <- checkResult
+        }
     }
 }
 
 func main() {
+    var err error
+    processedEvents := 0
+    
     // redis host, port, db
     // files…
     redisHost := flag.String("host", "", "redis hostname")
     redisPort := flag.Int("port", 6379, "redis port")
     redisDb   := flag.Int("db", 0, "redis database number")
+
+    statsdHost := flag.String("statsd-host", "", "statsd hostname")
+    statsdPort := flag.Int("statsd-port", 8125, "statsd port")
+    
+    verbose := flag.Bool("verbose", false, "be verbosey")
     
     flag.Parse()
     
@@ -115,9 +132,20 @@ func main() {
     if len(filenames) == 0 {
         log.Fatal("must provide file(s) to follow")
     }
+    
+    if len(*statsdHost) > 0 {
+        statsd, err = StatsD.New(fmt.Sprintf("%s:%d", *statsdHost, *statsdPort), "flapjack.nagios")
+        dieOnError(err)
+    } else {
+        log.Println("using noop statsd client")
+        statsd, err = StatsD.NewNoop()
+    }
 
     redis, err := Redis.Dial("tcp", fmt.Sprintf("%s:%d", *redisHost, *redisPort))
     dieOnError(err)
+    
+    // close redis connection on exit
+    defer redis.Close()
     
     dieOnError((*redis.Cmd("select", *redisDb)).Err)
     
@@ -125,13 +153,30 @@ func main() {
     
     for _, fn := range filenames {
         log.Printf("following %s", fn)
+        
         go followFile(fn, checkResultChan)
     }
     
+    // ensure tail cleans up on exit
+    defer tail.Cleanup()
+    
     for checkResult := range checkResultChan {
-        _json, err := json.Marshal(checkResult)
+        checkResultJson, err := json.Marshal(checkResult)
+        
         dieOnError(err)
         
-        dieOnError((*redis.Cmd("lpush", "events", string(_json))).Err)
+        jsonStr := string(checkResultJson)
+        
+        if *verbose {
+            log.Println(jsonStr)
+        }
+        
+        // put new events on the *end* of the queue
+        dieOnError((*redis.Cmd("rpush", "events", jsonStr)).Err)
+        
+        // keep in sync with flapjack-consul-receiver
+        statsd.Inc("events", 1, 1.0)
+
+        processedEvents += 1
     }
 }
