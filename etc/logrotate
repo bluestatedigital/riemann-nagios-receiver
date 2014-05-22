@@ -1,0 +1,8 @@
+/var/log/flapjack-nagios-receiver.log {
+    daily
+    rotate 5
+    copytruncate
+    compress
+    missingok
+    notifempty
+}
