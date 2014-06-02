@@ -20,13 +20,15 @@ var logger = logrus.New()
 
 // flapjack event structure, a la v0.8.11.
 type CheckResult struct {
-    Entity  string `json:"entity"`
-    Check   string `json:"check"`
-    Type    string `json:"type"`
-    State   string `json:"state"`
-    Summary string `json:"summary"`
-    Details string `json:"details"`
-    Time    int    `json:"time"`
+    Type     string `json:"type"`    // required
+    State    string `json:"state"`   // required
+    Entity   string `json:"entity"`  // required
+    Check    string `json:"check"`   // required
+    Summary  string `json:"summary"` // required
+    
+    Time     int    `json:"time"`
+    Details  string `json:"details"`
+    Perfdata string `json:"perfdata"`
 }
 
 // explode when things go badly
@@ -59,7 +61,7 @@ func parseNagLine(line string) (*CheckResult, error) {
     // checkTime     := lineBits[5]  // $SERVICEEXECUTIONTIME$, $HOSTEXECUTIONTIME$
     // checkLatency  := lineBits[6]  // $SERVICELATENCY$, $HOSTLATENCY$
     checkOutput   := lineBits[7]     // $SERVICEOUTPUT$, $HOSTOUTPUT$
-    // checkPerfdata := lineBits[8]     // $SERVICEPERFDATA$, $HOSTPERFDATA$
+    checkPerfdata := lineBits[8]     // $SERVICEPERFDATA$, $HOSTPERFDATA$
     
     checkLongOutput := ""
     if len(lineBits) >= 10 {
@@ -80,13 +82,14 @@ func parseNagLine(line string) (*CheckResult, error) {
     }
 
     return &CheckResult{
-        entity,        // entity
-        check,         // check
-        "service",     // type
-        state,         // state
-        checkOutput,   // summary
-        details,       // details
-        timestamp,     // time
+        "service",     // Type
+        state,         // State
+        entity,        // Entity
+        check,         // Check
+        checkOutput,   // Summary
+        timestamp,     // Time
+        details,       // Details
+        checkPerfdata, // Perfdata
     }, nil;
 }
 
