@@ -1,13 +1,14 @@
 package main
 
 import (
-    "log"
     "encoding/json"
     "fmt"
     "strconv"
     "strings"
     "flag"
     "os"
+
+    "github.com/Sirupsen/logrus"
     
     Redis "github.com/fzzy/radix/redis"
     "github.com/ActiveState/tail"
@@ -15,6 +16,7 @@ import (
 )
 
 var statsd StatsD.Statter
+var logger = logrus.New()
 
 // flapjack event structure, a la v0.8.11.
 type CheckResult struct {
@@ -30,7 +32,7 @@ type CheckResult struct {
 // explode when things go badly
 func dieOnError(err error) {
     if err != nil {
-        log.Fatal(err)
+        logger.Fatal(err)
     }
 }
 
@@ -103,7 +105,7 @@ func followFile(file string, c chan *CheckResult) {
         checkResult, err := parseNagLine(line.Text)
         
         if err != nil {
-            log.Println(err)
+            logger.Error(err)
             statsd.Inc("bad-lines", 1, 1.0)
         } else {
             c <- checkResult
@@ -124,24 +126,28 @@ func main() {
     statsdHost := flag.String("statsd-host", "", "statsd hostname")
     statsdPort := flag.Int("statsd-port", 8125, "statsd port")
     
-    verbose := flag.Bool("verbose", false, "be verbosey")
+    debug := flag.Bool("debug", false, "be verbosey")
+    
+    if *debug {
+        logger.Level = logrus.Debug
+    }
     
     flag.Parse()
     
     if len(*redisHost) == 0 {
-        log.Fatal("must provide -host");
+        logger.Fatal("must provide -host");
     }
     
     filenames := flag.Args()
     if len(filenames) == 0 {
-        log.Fatal("must provide file(s) to follow")
+        logger.Fatal("must provide file(s) to follow")
     }
     
     if len(*statsdHost) > 0 {
         statsd, err = StatsD.New(fmt.Sprintf("%s:%d", *statsdHost, *statsdPort), "flapjack.nagios")
         dieOnError(err)
     } else {
-        log.Println("using noop statsd client")
+        logger.Info("using noop statsd client")
         statsd, err = StatsD.NewNoop()
     }
 
@@ -156,7 +162,7 @@ func main() {
     checkResultChan := make(chan *CheckResult, 10) // buffered
     
     for _, fn := range filenames {
-        log.Printf("following %s", fn)
+        logger.Info("following %s", fn)
         
         go followFile(fn, checkResultChan)
     }
@@ -171,9 +177,7 @@ func main() {
         
         jsonStr := string(checkResultJson)
         
-        if *verbose {
-            log.Println(jsonStr)
-        }
+        logger.Debug(jsonStr)
         
         // put new events on the *end* of the queue
         dieOnError((*redis.Cmd("rpush", "events", jsonStr)).Err)
