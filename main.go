@@ -120,20 +120,21 @@ func main() {
     
     // redis host, port, db
     // files…
-    redisHost := flag.String("host", "", "redis hostname")
-    redisPort := flag.Int("port", 6379, "redis port")
-    redisDb   := flag.Int("db", 0, "redis database number")
+    redisHost := flag.String("host", "",   "redis hostname")
+    redisPort := flag.Int("port",    6379, "redis port")
+    redisDb   := flag.Int("db",      0,    "redis database number")
 
-    statsdHost := flag.String("statsd-host", "", "statsd hostname")
-    statsdPort := flag.Int("statsd-port", 8125, "statsd port")
+    statsdHost := flag.String("statsd-host", "",   "statsd hostname")
+    statsdPort := flag.Int("statsd-port",    8125, "statsd port")
     
     debug := flag.Bool("debug", false, "be verbosey")
     
-    if *debug {
-        logger.Level = logrus.Debug
-    }
-    
     flag.Parse()
+    
+    if *debug == true {
+        logger.Level = logrus.Debug
+        logger.Info("debug enabled")
+    }
     
     if len(*redisHost) == 0 {
         logger.Fatal("must provide -host");
