@@ -147,9 +147,13 @@ func main() {
     
     if len(*statsdHost) > 0 {
         statsd, err = StatsD.New(fmt.Sprintf("%s:%d", *statsdHost, *statsdPort), "flapjack.nagios")
-        logger.Fatalf("unable to create StatsD instance: %s", err)
+        
+        if err != nil {
+            logger.Fatalf("unable to create StatsD instance: %s", err)
+        }
     } else {
         logger.Info("using noop statsd client")
+
         statsd, err = StatsD.NewNoop()
     }
     
