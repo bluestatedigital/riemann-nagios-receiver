@@ -18,6 +18,7 @@ trap "echo removing ${tmpdir}; rm -rf ${tmpdir}" EXIT
 export GOPATH=${tmpdir}/gopath
 export GOBIN=${GOPATH}/bin
 
+rm -f flapjack-nagios-receiver
 go get -d -v ./...
 go build -v
 
