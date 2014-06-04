@@ -152,14 +152,13 @@ func main() {
         logger.Info("using noop statsd client")
         statsd, err = StatsD.NewNoop()
     }
-
-    redis, err := Redis.Dial("tcp", fmt.Sprintf("%s:%d", *redisHost, *redisPort))
+    
+    redisConnStr := fmt.Sprintf("%s:%d", *redisHost, *redisPort)
+    
+    redis, err := Redis.Dial("tcp", redisConnStr)
     if err != nil {
         logger.Fatalf("unable to connect to Redis: %s", err)
     }
-    
-    // close redis connection on exit
-    defer redis.Close()
     
     err = (*redis.Cmd("select", *redisDb)).Err
     if err != nil {
@@ -188,15 +187,29 @@ func main() {
         
         logger.Debug(jsonStr)
         
-        // put new events on the *end* of the queue
-        reply := redis.Cmd("rpush", "events", jsonStr)
-        if reply.Err != nil {
-            logger.Fatalf("error pushing to 'events' queue: %s", reply.Err)
+        if redis == nil {
+            // connection was previously closed
+            redis, err = Redis.Dial("tcp", redisConnStr)
+            
+            if err != nil {
+                logger.Errorf("unable to connect to Redis: %s", err)
+                continue
+            }
+
+            logger.Infof("reconnected to %s", redisConnStr)
+        }
+
+        reply := redis.Cmd("lpush", "events", jsonStr)
+        if reply.Err == nil {
+            // keep in sync with flapjack-consul-receiver
+            statsd.Inc("events", 1, 1.0)
+        } else {
+            logger.Errorf("error pushing to 'events' queue: %s; closing connection", reply.Err)
+            
+            redis.Close() // this returns an error, but seriously?
+            redis = nil
         }
         
-        // keep in sync with flapjack-consul-receiver
-        statsd.Inc("events", 1, 1.0)
-
         processedEvents += 1
     }
 }
