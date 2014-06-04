@@ -31,13 +31,6 @@ type CheckResult struct {
     Perfdata string `json:"perfdata"`
 }
 
-// explode when things go badly
-func dieOnError(err error) {
-    if err != nil {
-        logger.Fatal(err)
-    }
-}
-
 // parses a Nagios perfdata line, per https://github.com/flapjack/flapjack/wiki/USING#configuring-nagios
 func parseNagLine(line string) (*CheckResult, error) {
     lineBits := strings.Split(line, "\t")
@@ -102,13 +95,18 @@ func followFile(file string, c chan *CheckResult) {
         Location: &tail.SeekInfo{ 0, os.SEEK_END },
     })
     
-    dieOnError(err)
+    // die on error    
+    if err != nil {
+        logger.Fatalf("unable to open file: %s", err);
+    }
+
+    defer tailer.Stop()
     
     for line := range tailer.Lines {
         checkResult, err := parseNagLine(line.Text)
         
         if err != nil {
-            logger.Error(err)
+            logger.Errorf("error tailing %s: %s", file, err)
             statsd.Inc("bad-lines", 1, 1.0)
         } else {
             c <- checkResult
@@ -148,24 +146,29 @@ func main() {
     
     if len(*statsdHost) > 0 {
         statsd, err = StatsD.New(fmt.Sprintf("%s:%d", *statsdHost, *statsdPort), "flapjack.nagios")
-        dieOnError(err)
+        logger.Fatalf("unable to create StatsD instance: %s", err)
     } else {
         logger.Info("using noop statsd client")
         statsd, err = StatsD.NewNoop()
     }
 
     redis, err := Redis.Dial("tcp", fmt.Sprintf("%s:%d", *redisHost, *redisPort))
-    dieOnError(err)
+    if err != nil {
+        logger.Fatalf("unable to connect to Redis: %s", err)
+    }
     
     // close redis connection on exit
     defer redis.Close()
     
-    dieOnError((*redis.Cmd("select", *redisDb)).Err)
+    err = (*redis.Cmd("select", *redisDb)).Err
+    if err != nil {
+        logger.Fatalf("unable to select db: %s", err)
+    }
     
     checkResultChan := make(chan *CheckResult, 10) // buffered
     
     for _, fn := range filenames {
-        logger.Info("following %s", fn)
+        logger.Infof("following %s", fn)
         
         go followFile(fn, checkResultChan)
     }
@@ -176,14 +179,19 @@ func main() {
     for checkResult := range checkResultChan {
         checkResultJson, err := json.Marshal(checkResult)
         
-        dieOnError(err)
+        if err != nil {
+            logger.Fatalf("unable to serialize check result %s: %s", checkResult, err)
+        }
         
         jsonStr := string(checkResultJson)
         
         logger.Debug(jsonStr)
         
         // put new events on the *end* of the queue
-        dieOnError((*redis.Cmd("rpush", "events", jsonStr)).Err)
+        reply := redis.Cmd("rpush", "events", jsonStr)
+        if reply.Err != nil {
+            logger.Fatalf("error pushing to 'events' queue: %s", reply.Err)
+        }
         
         // keep in sync with flapjack-consul-receiver
         statsd.Inc("events", 1, 1.0)
