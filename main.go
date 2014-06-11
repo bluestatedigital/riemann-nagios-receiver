@@ -97,11 +97,11 @@ func parseNagLine(line string) (*Riemann.Event, error) {
         Service:     service,
         Description: details,
         Tags:        []string{ "nagios" },
-        Attributes:  make(map[string]string),
+        Attributes:  map[string]string{
+            "check_duration": checkDuration,
+            "check_latency":  checkLatency,
+        },
     }
-    
-    evt.Attributes["check_duration"] = checkDuration
-    evt.Attributes["check_latency"]  = checkLatency
     
     return &evt, nil;
 }
