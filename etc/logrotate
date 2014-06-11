@@ -1,4 +1,4 @@
-/var/log/flapjack-nagios-receiver.log {
+/var/log/riemann-nagios-receiver.log {
     daily
     rotate 5
     copytruncate

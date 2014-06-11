@@ -1,7 +1,6 @@
 package main
 
 import (
-    "encoding/json"
     "fmt"
     "strconv"
     "strings"
@@ -10,7 +9,7 @@ import (
 
     "github.com/Sirupsen/logrus"
     
-    Redis "github.com/fzzy/radix/redis"
+    Riemann "github.com/amir/raidman"
     "github.com/ActiveState/tail"
     StatsD "github.com/cactus/go-statsd-client/statsd"
 )
@@ -18,21 +17,13 @@ import (
 var statsd StatsD.Statter
 var logger = logrus.New()
 
-// flapjack event structure, a la v0.8.11.
-type CheckResult struct {
-    Type     string `json:"type"`    // required
-    State    string `json:"state"`   // required
-    Entity   string `json:"entity"`  // required
-    Check    string `json:"check"`   // required
-    Summary  string `json:"summary"` // required
-    
-    Time     int    `json:"time"`
-    Details  string `json:"details"`
-    Perfdata string `json:"perfdata"`
-}
-
 // parses a Nagios perfdata line, per https://github.com/flapjack/flapjack/wiki/USING#configuring-nagios
-func parseNagLine(line string) (*CheckResult, error) {
+func parseNagLine(line string) (*Riemann.Event, error) {
+    /*
+    host_perfdata_file_template=[HOSTPERFDATA]\t$TIMET$\t$HOSTNAME$\tHOST\t$HOSTSTATE$\t$HOSTEXECUTIONTIME$\t$HOSTLATENCY$\t$HOSTOUTPUT$\t$HOSTPERFDATA$
+    service_perfdata_file_template=[SERVICEPERFDATA]\t$TIMET$\t$HOSTNAME$\t$SERVICEDESC$\t$SERVICESTATE$\t$SERVICEEXECUTIONTIME$\t$SERVICELATENCY$\t$SERVICEOUTPUT$\t$SERVICEPERFDATA$
+    */
+    
     lineBits := strings.Split(line, "\t")
 
     if len(lineBits) <= 8 {
@@ -43,50 +34,79 @@ func parseNagLine(line string) (*CheckResult, error) {
         return nil, fmt.Errorf("rejecting this line as first string is neither '[HOSTPERFDATA]' nor '[SERVICEPERFDATA]': [%s]", line)
     }
     
-    timestamp, err := strconv.Atoi(lineBits[1])
+    // $TIME$
+    timestamp, err := strconv.ParseInt(lineBits[1], 10, 64)
     if err != nil {
         return nil, fmt.Errorf("rejecting this line as second string doesn't look like a timestamp: [%s]", line)
     }
     
-    entity        := lineBits[2]     // $HOSTNAME$
-    check         := lineBits[3]     // $SERVICEDESC$, "HOST"
-    state         := lineBits[4]     // $SERVICESTATE$, $HOSTSTATE$
-    // checkTime     := lineBits[5]  // $SERVICEEXECUTIONTIME$, $HOSTEXECUTIONTIME$
-    // checkLatency  := lineBits[6]  // $SERVICELATENCY$, $HOSTLATENCY$
-    checkOutput   := lineBits[7]     // $SERVICEOUTPUT$, $HOSTOUTPUT$
-    checkPerfdata := lineBits[8]     // $SERVICEPERFDATA$, $HOSTPERFDATA$
-    
-    checkLongOutput := ""
-    if len(lineBits) >= 10 {
-        checkLongOutput = strings.Replace(lineBits[9], "\\n", "\n", -1)
-    }
+    host    := lineBits[2] // $HOSTNAME$
+    service := lineBits[3] // $SERVICEDESC$, "HOST"
 
-    if strings.ToLower(state) == "up" {
+    // $SERVICESTATE$, $HOSTSTATE$
+    // A string indicating the current state of the service ("OK", "WARNING", "UNKNOWN", or "CRITICAL").
+    // A string indicating the current state of the host ("UP", "DOWN", or "UNREACHABLE").
+    state := strings.ToLower(lineBits[4])
+
+    // $SERVICEEXECUTIONTIME$, $HOSTEXECUTIONTIME$
+    // A (floating point) number indicating the number of seconds that the
+    // (service|host) check took to execute (i.e. the amount of time the check
+    // was executing).
+    checkDuration := lineBits[5]
+    
+    // $SERVICELATENCY$, $HOSTLATENCY$
+    // A (floating point) number indicating the number of seconds that a
+    // scheduled (service|host) check lagged behind its scheduled check time.
+    // For instance, if a check was scheduled for 03:14:15 and it didn't get
+    // executed until 03:14:17, there would be a check latency of 2.0 seconds.
+    // On-demand (service|host) checks have a latency of zero seconds.
+    checkLatency := lineBits[6]
+    
+    // $SERVICEOUTPUT$, $HOSTOUTPUT$
+    // The first line of text output from the last service check (i.e. "Ping
+    // OK").
+    details := lineBits[7]
+
+    // $SERVICEPERFDATA$, $HOSTPERFDATA$
+    // checkPerfdata := lineBits[8] 
+    
+    // $LONGSERVICEOUTPUT$
+    // The full text output (aside from the first line) from the last service
+    // check.
+    // checkLongOutput := ""
+    // if len(lineBits) >= 10 {
+    //     details = details + "\n\n" + strings.Replace(lineBits[9], "\\n", "\n", -1)
+    // }
+
+    if state == "up" {
         state = "ok"
     }
 
-    if strings.ToLower(state) == "down" {
+    if state == "unreachable" {
+        state = "unknown"
+    }
+    
+    if state == "down" {
         state = "critical"
     }
     
-    details := ""
-    if len(checkLongOutput) > 0 {
-        details = checkLongOutput
+    evt := Riemann.Event{
+        Time:        timestamp,
+        State:       state,
+        Host:        host,
+        Service:     service,
+        Description: details,
+        Tags:        []string{ "nagios" },
+        Attributes:  make(map[string]string),
     }
-
-    return &CheckResult{
-        "service",     // Type
-        state,         // State
-        entity,        // Entity
-        check,         // Check
-        checkOutput,   // Summary
-        timestamp,     // Time
-        details,       // Details
-        checkPerfdata, // Perfdata
-    }, nil;
+    
+    evt.Attributes["check_duration"] = checkDuration
+    evt.Attributes["check_latency"]  = checkLatency
+    
+    return &evt, nil;
 }
 
-func followFile(file string, c chan *CheckResult) {
+func followFile(file string, c chan *Riemann.Event) {
     tailer, err := tail.TailFile(file, tail.Config{
         ReOpen: true,
         Follow: true,
@@ -103,26 +123,24 @@ func followFile(file string, c chan *CheckResult) {
     defer tailer.Stop()
     
     for line := range tailer.Lines {
-        checkResult, err := parseNagLine(line.Text)
+        event, err := parseNagLine(line.Text)
         
         if err != nil {
             logger.Errorf("error tailing %s: %s", file, err)
             statsd.Inc("bad-lines", 1, 1.0)
         } else {
-            c <- checkResult
+            c <- event
         }
     }
 }
 
 func main() {
     var err error
-    processedEvents := 0
     
-    // redis host, port, db
+    // riemann host, port
     // files…
-    redisHost := flag.String("host", "",   "redis hostname")
-    redisPort := flag.Int("port",    6379, "redis port")
-    redisDb   := flag.Int("db",      0,    "redis database number")
+    riemannHost := flag.String("host", "",   "riemann hostname")
+    riemannPort := flag.Int("port",    5555, "riemann port")
 
     statsdHost := flag.String("statsd-host", "",   "statsd hostname")
     statsdPort := flag.Int("statsd-port",    8125, "statsd port")
@@ -136,7 +154,7 @@ func main() {
         logger.Info("debug enabled")
     }
     
-    if len(*redisHost) == 0 {
+    if len(*riemannHost) == 0 {
         logger.Fatal("must provide -host");
     }
     
@@ -146,7 +164,7 @@ func main() {
     }
     
     if len(*statsdHost) > 0 {
-        statsd, err = StatsD.New(fmt.Sprintf("%s:%d", *statsdHost, *statsdPort), "flapjack.nagios")
+        statsd, err = StatsD.New(fmt.Sprintf("%s:%d", *statsdHost, *statsdPort), "riemann.nagios")
         
         if err != nil {
             logger.Fatalf("unable to create StatsD instance: %s", err)
@@ -157,63 +175,48 @@ func main() {
         statsd, err = StatsD.NewNoop()
     }
     
-    redisConnStr := fmt.Sprintf("%s:%d", *redisHost, *redisPort)
+    riemannConnStr := fmt.Sprintf("%s:%d", *riemannHost, *riemannPort)
     
-    redis, err := Redis.Dial("tcp", redisConnStr)
+    riemann, err := Riemann.Dial("tcp", riemannConnStr)
     if err != nil {
-        logger.Fatalf("unable to connect to Redis: %s", err)
+        logger.Fatalf("unable to connect to Riemann: %s", err)
     }
     
-    err = (*redis.Cmd("select", *redisDb)).Err
-    if err != nil {
-        logger.Fatalf("unable to select db: %s", err)
-    }
-    
-    checkResultChan := make(chan *CheckResult, 10) // buffered
+    eventChan := make(chan *Riemann.Event, 10) // buffered
     
     for _, fn := range filenames {
         logger.Infof("following %s", fn)
         
-        go followFile(fn, checkResultChan)
+        go followFile(fn, eventChan)
     }
     
     // ensure tail cleans up on exit
     defer tail.Cleanup()
     
-    for checkResult := range checkResultChan {
-        checkResultJson, err := json.Marshal(checkResult)
+    for event := range eventChan {
+        logger.Debug(event)
         
-        if err != nil {
-            logger.Fatalf("unable to serialize check result %s: %s", checkResult, err)
-        }
-        
-        jsonStr := string(checkResultJson)
-        
-        logger.Debug(jsonStr)
-        
-        if redis == nil {
+        if riemann == nil {
             // connection was previously closed
-            redis, err = Redis.Dial("tcp", redisConnStr)
+            riemann, err = Riemann.Dial("tcp", riemannConnStr)
             
             if err != nil {
-                logger.Errorf("unable to connect to Redis: %s", err)
+                logger.Errorf("unable to connect to Riemann: %s", err)
                 continue
             }
 
-            logger.Infof("reconnected to %s", redisConnStr)
+            logger.Infof("reconnected to %s", riemannConnStr)
         }
 
-        reply := redis.Cmd("lpush", "events", jsonStr)
-        if reply.Err == nil {
-            // keep in sync with flapjack-consul-receiver
+        err := riemann.Send(event)
+
+        if err == nil {
+            // keep in sync with flapjack-nagios-receiver
             statsd.Inc("events", 1, 1.0)
         } else {
-            logger.Errorf("error pushing to 'events' queue: %s; closing connection", reply.Err)
+            logger.Errorf("error sending event to Riemann: %s; closing connection", err)
             
-            redis.Close() // this returns an error, but seriously?
-            redis = nil
+            riemann = nil
         }
-        
-        processedEvents += 1
     }
 }

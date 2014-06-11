@@ -1,28 +1,28 @@
 #!/bin/bash
 #
-# flapjack-nagios-receiver Manage flapjack-nagios-receiver
+# riemann-nagios-receiver Manage riemann-nagios-receiver
 #       
 # chkconfig:   2345 95 95
-# description: flapjack-nagios-receiver pushes check status from Nagios to Flapjack
-# processname: flapjack-nagios-receiver
-# pidfile: /var/run/flapjack-nagios-receiver.pid
+# description: riemann-nagios-receiver pushes check status from Nagios to Riemann
+# processname: riemann-nagios-receiver
+# pidfile: /var/run/riemann-nagios-receiver.pid
 
 ### BEGIN INIT INFO
-# Provides:       flapjack-nagios-receiver
+# Provides:       riemann-nagios-receiver
 # Required-Start: $local_fs $network
 # Required-Stop:
 # Should-Start:
 # Should-Stop:
 # Default-Start: 2 3 4 5
 # Default-Stop:  0 1 6
-# Short-Description: Manage flapjack-nagios-receiver
-# Description: flapjack-nagios-receiver pushes check status from Nagios to Flapjack
+# Short-Description: Manage riemann-nagios-receiver
+# Description: riemann-nagios-receiver pushes check status from Nagios to Riemann
 ### END INIT INFO
 
 # source function library
 . /etc/rc.d/init.d/functions
 
-prog="flapjack-nagios-receiver"
+prog="riemann-nagios-receiver"
 user="nag"
 exec="/opt/local/bin/${prog}"
 pidfile="/var/run/${prog}.pid"
@@ -36,13 +36,12 @@ start() {
     [ -x $exec ] || exit 5
     
     ## check for required config
-    if [ -z "${redis_host}" ] || [ -z "${redis_port}" ] || [ -z "${redis_db}" ] || [ -z "${nag_files}" ]; then
+    if [ -z "${riemann_host}" ] || [ -z "${riemann_port}" ] || [ -z "${nag_files}" ]; then
         exit 6
     fi
     
-    opts="-host ${redis_host}"
-    opts="${opts} -port ${redis_port}"
-    opts="${opts} -db ${redis_db}"
+    opts="-host ${riemann_host}"
+    opts="${opts} -port ${riemann_port}"
 
     if [ ! -z "${statsd_host}" ]; then
         opts="${opts} -statsd-host ${statsd_host}"

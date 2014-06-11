@@ -18,7 +18,7 @@ trap "echo removing ${tmpdir}; rm -rf ${tmpdir}" EXIT
 export GOPATH=${tmpdir}/gopath
 export GOBIN=${GOPATH}/bin
 
-rm -f flapjack-nagios-receiver
+rm -f riemann-nagios-receiver
 go get -d -v ./...
 go build -v
 
@@ -26,19 +26,19 @@ pushd ${tmpdir}
 
 mkdir -p opt/local/bin etc/rc.d/init.d etc/logrotate.d etc/sysconfig
 
-cp ${_basedir}/etc/logrotate etc/logrotate.d/flapjack-nagios-receiver
-cp ${_basedir}/etc/sysconfig etc/sysconfig/flapjack-nagios-receiver
-cp ${_basedir}/etc/sysvinit.sh etc/rc.d/init.d/flapjack-nagios-receiver
-cp ${_basedir}/flapjack-nagios-receiver opt/local/bin
+cp ${_basedir}/etc/logrotate etc/logrotate.d/riemann-nagios-receiver
+cp ${_basedir}/etc/sysconfig etc/sysconfig/riemann-nagios-receiver
+cp ${_basedir}/etc/sysvinit.sh etc/rc.d/init.d/riemann-nagios-receiver
+cp ${_basedir}/riemann-nagios-receiver opt/local/bin
 
 popd
 fpm \
     -s dir \
     -t rpm \
-    -n flapjack-nagios-receiver \
+    -n riemann-nagios-receiver \
     -v ${PKG_VER} \
     --iteration ${PKG_ITER} \
     --rpm-use-file-permissions \
-    --config-files /etc/sysconfig/flapjack-nagios-receiver \
+    --config-files /etc/sysconfig/riemann-nagios-receiver \
     -C ${tmpdir} \
     etc opt
