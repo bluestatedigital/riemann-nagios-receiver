@@ -125,12 +125,12 @@ func followFile(file string, ttl int, c chan *Riemann.Event) {
     for line := range tailer.Lines {
         event, err := parseNagLine(line.Text)
         
-        event.Ttl = float32(ttl)
-        
         if err != nil {
             logger.Errorf("error tailing %s: %s", file, err)
             statsd.Inc("bad-lines", 1, 1.0)
         } else {
+            event.Ttl = float32(ttl)
+            
             c <- event
         }
     }
