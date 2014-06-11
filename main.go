@@ -106,7 +106,7 @@ func parseNagLine(line string) (*Riemann.Event, error) {
     return &evt, nil;
 }
 
-func followFile(file string, c chan *Riemann.Event) {
+func followFile(file string, ttl int, c chan *Riemann.Event) {
     tailer, err := tail.TailFile(file, tail.Config{
         ReOpen: true,
         Follow: true,
@@ -125,6 +125,8 @@ func followFile(file string, c chan *Riemann.Event) {
     for line := range tailer.Lines {
         event, err := parseNagLine(line.Text)
         
+        event.Ttl = float32(ttl)
+        
         if err != nil {
             logger.Errorf("error tailing %s: %s", file, err)
             statsd.Inc("bad-lines", 1, 1.0)
@@ -141,6 +143,7 @@ func main() {
     // files…
     riemannHost := flag.String("host", "",   "riemann hostname")
     riemannPort := flag.Int("port",    5555, "riemann port")
+    ttl         := flag.Int("ttl",     300,  "riemann event ttl (seconds)")
 
     statsdHost := flag.String("statsd-host", "",   "statsd hostname")
     statsdPort := flag.Int("statsd-port",    8125, "statsd port")
@@ -187,7 +190,7 @@ func main() {
     for _, fn := range filenames {
         logger.Infof("following %s", fn)
         
-        go followFile(fn, eventChan)
+        go followFile(fn, *ttl, eventChan)
     }
     
     // ensure tail cleans up on exit

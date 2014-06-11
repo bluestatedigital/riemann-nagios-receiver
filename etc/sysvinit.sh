@@ -36,12 +36,13 @@ start() {
     [ -x $exec ] || exit 5
     
     ## check for required config
-    if [ -z "${riemann_host}" ] || [ -z "${riemann_port}" ] || [ -z "${nag_files}" ]; then
+    if [ -z "${riemann_host}" ] || [ -z "${riemann_port}" ] || [ -z "${riemann_ttl}" ] || [ -z "${nag_files}" ]; then
         exit 6
     fi
     
     opts="-host ${riemann_host}"
     opts="${opts} -port ${riemann_port}"
+    opts="${opts} -ttl ${riemann_ttl}"
 
     if [ ! -z "${statsd_host}" ]; then
         opts="${opts} -statsd-host ${statsd_host}"

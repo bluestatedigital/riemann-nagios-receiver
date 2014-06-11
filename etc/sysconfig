@@ -3,6 +3,7 @@
 ## required settings
 riemann_host=""
 riemann_port="5555"
+riemann_ttl="500"
 
 statsd_host=""
 
