@@ -19,7 +19,7 @@ var logger = logrus.New()
 
 // parses a Nagios perfdata line, inspired by
 // https://github.com/flapjack/flapjack/wiki/USING#configuring-nagios
-func parseNagLine(line string, ttlPad int) (*Riemann.Event, error) {
+func parseNagLine(line string, ttlPad int, minTtl int) (*Riemann.Event, error) {
     /* tab-delimited
     host_perfdata_file_template=   [HOSTPERFDATA]     $TIMET$ $LASTHOSTCHECK$    $HOSTNAME$ HOST          $HOSTSTATE$    $HOSTOUTPUT$    $HOSTPERFDATA$    $LONGHOSTOUTPUT$
     service_perfdata_file_template=[SERVICEPERFDATA]  $TIMET$ $LASTSERVICECHECK$ $HOSTNAME$ $SERVICEDESC$ $SERVICESTATE$ $SERVICEOUTPUT$ $SERVICEPERFDATA$ $LONGSERVICEOUTPUT$
@@ -38,13 +38,13 @@ func parseNagLine(line string, ttlPad int) (*Riemann.Event, error) {
     }
     
     // $TIME$
-    timestamp, err := strconv.ParseInt(tokens[1], 10, 64)
+    timestamp, err := strconv.ParseInt(tokens[1], 10, 0)
     if err != nil {
         return nil, fmt.Errorf("rejecting this line as second string doesn't look like a timestamp: [%s]", line)
     }
     
     // $LASTHOSTCHECK$, $LASTSERVICECHECK$
-    lastCheckTime, err := strconv.ParseInt(tokens[2], 10, 64)
+    lastCheckTime, err := strconv.ParseInt(tokens[2], 10, 0)
     if err != nil {
         return nil, fmt.Errorf("rejecting this line as third string doesn't look like a timestamp: [%s]", line)
     } 
@@ -52,7 +52,11 @@ func parseNagLine(line string, ttlPad int) (*Riemann.Event, error) {
     // TTL based on *last* check; whatev.  there's no way in nag to provide the
     // check interval as a macro, and our config has intervals betwen 1 minute
     // and 1 hour.
-    var ttl float32 = float32(int(timestamp - lastCheckTime) * ttlPad)
+    ttl := int(timestamp) - int(lastCheckTime)
+    
+    if (ttl < minTtl) {
+        ttl = minTtl
+    }
     
     host    := tokens[3] // $HOSTNAME$
     service := tokens[4] // $SERVICEDESC$, "HOST"
@@ -95,7 +99,7 @@ func parseNagLine(line string, ttlPad int) (*Riemann.Event, error) {
     
     evt := Riemann.Event{
         Time:        timestamp,
-        Ttl:         ttl,
+        Ttl:         float32(ttl * ttlPad),
         State:       state,
         Host:        host,
         Service:     service,
@@ -109,7 +113,7 @@ func parseNagLine(line string, ttlPad int) (*Riemann.Event, error) {
     return &evt, nil;
 }
 
-func followFile(file string, ttlPad int, c chan *Riemann.Event) {
+func followFile(file string, ttlPad int, minTtl int, c chan *Riemann.Event) {
     tailer, err := tail.TailFile(file, tail.Config{
         ReOpen: true,
         Follow: true,
@@ -126,7 +130,7 @@ func followFile(file string, ttlPad int, c chan *Riemann.Event) {
     defer tailer.Stop()
     
     for line := range tailer.Lines {
-        event, err := parseNagLine(line.Text, ttlPad)
+        event, err := parseNagLine(line.Text, ttlPad, minTtl)
         
         if err != nil {
             logger.Errorf("error tailing %s: %s", file, err)
@@ -144,7 +148,8 @@ func main() {
     // files…
     riemannHost := flag.String("host", "",   "riemann hostname")
     riemannPort := flag.Int("port",    5555, "riemann port")
-    ttlPad      := flag.Int("ttl-pad", 3,    "riemann event ttl padding; multiple")
+    minTtl      := flag.Int("min-ttl", 60,   "minimum ttl")
+    ttlPad      := flag.Int("ttl-pad", 3,    "ttl multiplier")
 
     statsdHost := flag.String("statsd-host", "",   "statsd hostname")
     statsdPort := flag.Int("statsd-port",    8125, "statsd port")
@@ -191,7 +196,7 @@ func main() {
     for _, fn := range filenames {
         logger.Infof("following %s", fn)
         
-        go followFile(fn, *ttlPad, eventChan)
+        go followFile(fn, *ttlPad, *minTtl, eventChan)
     }
     
     // ensure tail cleans up on exit

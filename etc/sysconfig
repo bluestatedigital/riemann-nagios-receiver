@@ -2,8 +2,11 @@
 
 ## required settings
 riemann_host=""
-riemann_port="5555"
-riemann_ttl_pad="5"
+
+## optional settings (with defaults)
+#riemann_port="5555"
+#riemann_ttl_pad="3"
+#riemann_min_ttl="60"
 
 statsd_host=""
 
