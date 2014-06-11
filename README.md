@@ -20,8 +20,8 @@ In your Nagios config:
     host_perfdata_file=/path/to/host-perfdata.log
     service_perfdata_file=/path/to/service-perfdata.log
     
-    host_perfdata_file_template=[HOSTPERFDATA]\t$TIMET$\t$HOSTNAME$\tHOST\t$HOSTSTATE$\t$HOSTEXECUTIONTIME$\t$HOSTLATENCY$\t$HOSTOUTPUT$\t$HOSTPERFDATA$
-    service_perfdata_file_template=[SERVICEPERFDATA]\t$TIMET$\t$HOSTNAME$\t$SERVICEDESC$\t$SERVICESTATE$\t$SERVICEEXECUTIONTIME$\t$SERVICELATENCY$\t$SERVICEOUTPUT$\t$SERVICEPERFDATA$
+    host_perfdata_file_template=[HOSTPERFDATA]\t$TIMET$\t$LASTHOSTCHECK$\t$HOSTNAME$\tHOST\t$HOSTSTATE$\t$HOSTOUTPUT$\t$HOSTPERFDATA$\t$LONGHOSTOUTPUT$
+    service_perfdata_file_template=[SERVICEPERFDATA]\t$TIMET$\t$LASTSERVICECHECK$\t$HOSTNAME$\t$SERVICEDESC$\t$SERVICESTATE$\t$SERVICEOUTPUT$\t$SERVICEPERFDATA$\t$LONGSERVICEOUTPUT$
     
     host_perfdata_file_mode=a
     service_perfdata_file_mode=a

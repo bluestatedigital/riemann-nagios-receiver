@@ -17,66 +17,69 @@ import (
 var statsd StatsD.Statter
 var logger = logrus.New()
 
-// parses a Nagios perfdata line, per https://github.com/flapjack/flapjack/wiki/USING#configuring-nagios
-func parseNagLine(line string) (*Riemann.Event, error) {
-    /*
-    host_perfdata_file_template=[HOSTPERFDATA]\t$TIMET$\t$HOSTNAME$\tHOST\t$HOSTSTATE$\t$HOSTEXECUTIONTIME$\t$HOSTLATENCY$\t$HOSTOUTPUT$\t$HOSTPERFDATA$
-    service_perfdata_file_template=[SERVICEPERFDATA]\t$TIMET$\t$HOSTNAME$\t$SERVICEDESC$\t$SERVICESTATE$\t$SERVICEEXECUTIONTIME$\t$SERVICELATENCY$\t$SERVICEOUTPUT$\t$SERVICEPERFDATA$
+// parses a Nagios perfdata line, inspired by
+// https://github.com/flapjack/flapjack/wiki/USING#configuring-nagios
+func parseNagLine(line string, ttlPad int) (*Riemann.Event, error) {
+    /* tab-delimited
+    host_perfdata_file_template=   [HOSTPERFDATA]     $TIMET$ $LASTHOSTCHECK$    $HOSTNAME$ HOST          $HOSTSTATE$    $HOSTOUTPUT$    $HOSTPERFDATA$    $LONGHOSTOUTPUT$
+    service_perfdata_file_template=[SERVICEPERFDATA]  $TIMET$ $LASTSERVICECHECK$ $HOSTNAME$ $SERVICEDESC$ $SERVICESTATE$ $SERVICEOUTPUT$ $SERVICEPERFDATA$ $LONGSERVICEOUTPUT$
+                                   0                  1       2                  3          4             5              6               7                 8
     */
     
-    lineBits := strings.Split(line, "\t")
+    // split into at most 9 tokens
+    tokens := strings.SplitN(line, "\t", 9)
 
-    if len(lineBits) <= 8 {
+    if len(tokens) <= 8 {
         return nil, fmt.Errorf("Line doesn't split into at least 9 tab-separated strings: [%s]", line)
     }
 
-    if lineBits[0] != "[HOSTPERFDATA]" && lineBits[0] != "[SERVICEPERFDATA]" {
+    if tokens[0] != "[HOSTPERFDATA]" && tokens[0] != "[SERVICEPERFDATA]" {
         return nil, fmt.Errorf("rejecting this line as first string is neither '[HOSTPERFDATA]' nor '[SERVICEPERFDATA]': [%s]", line)
     }
     
     // $TIME$
-    timestamp, err := strconv.ParseInt(lineBits[1], 10, 64)
+    timestamp, err := strconv.ParseInt(tokens[1], 10, 64)
     if err != nil {
         return nil, fmt.Errorf("rejecting this line as second string doesn't look like a timestamp: [%s]", line)
     }
     
-    host    := lineBits[2] // $HOSTNAME$
-    service := lineBits[3] // $SERVICEDESC$, "HOST"
+    // $LASTHOSTCHECK$, $LASTSERVICECHECK$
+    lastCheckTime, err := strconv.ParseInt(tokens[2], 10, 64)
+    if err != nil {
+        return nil, fmt.Errorf("rejecting this line as third string doesn't look like a timestamp: [%s]", line)
+    } 
+    
+    // TTL based on *last* check; whatev.  there's no way in nag to provide the
+    // check interval as a macro, and our config has intervals betwen 1 minute
+    // and 1 hour.
+    var ttl float32 = float32(int(timestamp - lastCheckTime) * ttlPad)
+    
+    host    := tokens[3] // $HOSTNAME$
+    service := tokens[4] // $SERVICEDESC$, "HOST"
 
     // $SERVICESTATE$, $HOSTSTATE$
     // A string indicating the current state of the service ("OK", "WARNING", "UNKNOWN", or "CRITICAL").
     // A string indicating the current state of the host ("UP", "DOWN", or "UNREACHABLE").
-    state := strings.ToLower(lineBits[4])
+    state := strings.ToLower(tokens[5])
 
-    // $SERVICEEXECUTIONTIME$, $HOSTEXECUTIONTIME$
-    // A (floating point) number indicating the number of seconds that the
-    // (service|host) check took to execute (i.e. the amount of time the check
-    // was executing).
-    checkDuration := lineBits[5]
-    
-    // $SERVICELATENCY$, $HOSTLATENCY$
-    // A (floating point) number indicating the number of seconds that a
-    // scheduled (service|host) check lagged behind its scheduled check time.
-    // For instance, if a check was scheduled for 03:14:15 and it didn't get
-    // executed until 03:14:17, there would be a check latency of 2.0 seconds.
-    // On-demand (service|host) checks have a latency of zero seconds.
-    checkLatency := lineBits[6]
-    
     // $SERVICEOUTPUT$, $HOSTOUTPUT$
     // The first line of text output from the last service check (i.e. "Ping
     // OK").
-    details := lineBits[7]
+    details := tokens[6]
 
     // $SERVICEPERFDATA$, $HOSTPERFDATA$
-    // checkPerfdata := lineBits[8] 
+    checkPerfdata := strings.TrimSpace(tokens[7])
     
-    // $LONGSERVICEOUTPUT$
+    // $LONGSERVICEOUTPUT$, $LONGHOSTOUTPUT$
     // The full text output (aside from the first line) from the last service
     // check.
-    // checkLongOutput := ""
-    // if len(lineBits) >= 10 {
-    //     details = details + "\n\n" + strings.Replace(lineBits[9], "\\n", "\n", -1)
-    // }
+    if len(tokens) == 9 {
+        longOutput := strings.TrimSpace(strings.Replace(tokens[8], "\\n", "\n", -1))
+        
+        if len(longOutput) > 0 {
+            details = details + "\n\n" + longOutput
+        }
+    }
 
     if state == "up" {
         state = "ok"
@@ -92,21 +95,21 @@ func parseNagLine(line string) (*Riemann.Event, error) {
     
     evt := Riemann.Event{
         Time:        timestamp,
+        Ttl:         ttl,
         State:       state,
         Host:        host,
         Service:     service,
         Description: details,
         Tags:        []string{ "nagios" },
         Attributes:  map[string]string{
-            "check_duration": checkDuration,
-            "check_latency":  checkLatency,
+            "perfdata": checkPerfdata,
         },
     }
     
     return &evt, nil;
 }
 
-func followFile(file string, ttl int, c chan *Riemann.Event) {
+func followFile(file string, ttlPad int, c chan *Riemann.Event) {
     tailer, err := tail.TailFile(file, tail.Config{
         ReOpen: true,
         Follow: true,
@@ -123,14 +126,12 @@ func followFile(file string, ttl int, c chan *Riemann.Event) {
     defer tailer.Stop()
     
     for line := range tailer.Lines {
-        event, err := parseNagLine(line.Text)
+        event, err := parseNagLine(line.Text, ttlPad)
         
         if err != nil {
             logger.Errorf("error tailing %s: %s", file, err)
             statsd.Inc("bad-lines", 1, 1.0)
         } else {
-            event.Ttl = float32(ttl)
-            
             c <- event
         }
     }
@@ -143,7 +144,7 @@ func main() {
     // files…
     riemannHost := flag.String("host", "",   "riemann hostname")
     riemannPort := flag.Int("port",    5555, "riemann port")
-    ttl         := flag.Int("ttl",     300,  "riemann event ttl (seconds)")
+    ttlPad      := flag.Int("ttl-pad", 3,    "riemann event ttl padding; multiple")
 
     statsdHost := flag.String("statsd-host", "",   "statsd hostname")
     statsdPort := flag.Int("statsd-port",    8125, "statsd port")
@@ -190,14 +191,14 @@ func main() {
     for _, fn := range filenames {
         logger.Infof("following %s", fn)
         
-        go followFile(fn, *ttl, eventChan)
+        go followFile(fn, *ttlPad, eventChan)
     }
     
     // ensure tail cleans up on exit
     defer tail.Cleanup()
     
     for event := range eventChan {
-        logger.Debug(event)
+        logger.Debugf("%+v", event)
         
         if riemann == nil {
             // connection was previously closed
