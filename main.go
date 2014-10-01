@@ -117,6 +117,9 @@ func followFile(file string, ttlPad int, minTtl int, c chan *Riemann.Event) {
     tailer, err := tail.TailFile(file, tail.Config{
         ReOpen: true,
         Follow: true,
+
+        // I think I'm running into https://github.com/ActiveState/tail/issues/21
+        Poll: true,
         
         // start reading from the end of the file
         Location: &tail.SeekInfo{ 0, os.SEEK_END },
