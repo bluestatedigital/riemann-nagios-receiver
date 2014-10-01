@@ -64,7 +64,7 @@ stage/$(NAME): .godeps/.gpm_installed $(SOURCES) | stage
 	$(GVP) in go build -o $@ -ldflags '-X\ main.version\ $(VER)' -v .
 
 ## same, but shorter
-build: test stage/$(NAME)
+build: stage/$(NAME)
 
 ## duh
 clean:
