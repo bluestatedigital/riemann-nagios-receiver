@@ -1,2 +1,3 @@
 riemann-nagios-receiver
 *.rpm
+.godeps/

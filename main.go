@@ -159,7 +159,7 @@ func main() {
     flag.Parse()
     
     if *debug == true {
-        logger.Level = logrus.Debug
+        logger.Level = logrus.DebugLevel
         logger.Info("debug enabled")
     }
     
