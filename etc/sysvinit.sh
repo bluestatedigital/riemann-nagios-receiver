@@ -24,7 +24,7 @@
 
 prog="riemann-nagios-receiver"
 user="nag"
-exec="/opt/local/bin/${prog}"
+exec="/usr/bin/${prog}"
 pidfile="/var/run/${prog}.pid"
 lockfile="/var/lock/subsys/${prog}"
 logfile="/var/log/${prog}.log"

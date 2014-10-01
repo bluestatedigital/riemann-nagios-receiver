@@ -71,18 +71,19 @@ clean:
 	rm -rf stage .godeps release
 
 rpm: build
-	mkdir -p stage/rpm/usr/bin stage/rpm/etc/logrotate.d stage/rpm/etc/sysconfig stage/rpm/etc/rc.d/init.d
+	mkdir -p \
+		stage/rpm/usr/bin \
+		stage/rpm/etc/logrotate.d \
+		stage/rpm/etc/sysconfig \
+		stage/rpm/etc/rc.d/init.d
 	
 	cp stage/$(NAME) stage/rpm/usr/bin/
-	
-	## config file
+	cp etc/logrotate stage/rpm/etc/logrotate.d/$(NAME)
 	cp etc/sysconfig stage/rpm/etc/sysconfig/$(NAME)
-	cp etc/riemann-consul-receiver.logrotate stage/rpm/etc/logrotate.d/$(NAME)
-	
-	## init script
 	cp etc/sysvinit.sh stage/rpm/etc/rc.d/init.d/$(NAME)
+	
 	chmod 555 stage/rpm/etc/rc.d/init.d/$(NAME)
-
+	
 	cd stage && fpm \
 	    -s dir \
 	    -t rpm \
