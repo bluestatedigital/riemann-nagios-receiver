@@ -1,16 +1,23 @@
 NAME=riemann-nagios-receiver
-## tags are like v1.0.0
-VER=$(shell git describe --always --dirty | sed -e 's/^v//g' )
-BIN=.godeps/bin
-IMPORT_PATH=github.com/bluestatedigital/$(NAME)
 
+## the go-get'able path
+PKG_PATH=github.com/bluestatedigital/$(NAME)
+
+## version, taken from Git tag (like v1.0.0) or hash
+VER:=$(shell git describe --always --dirty | sed -e 's/^v//g' )
+
+BIN=.godeps/bin
 GPM=$(BIN)/gpm
 GPM_LINK=$(BIN)/gpm-link
 GVP=$(BIN)/gvp
 
 ## @todo should use "$(GVP) in", but that fails
-SOURCES=$(shell go list -f '{{range .GoFiles}}{{.}} {{end}}' . )
-TEST_SOURCES=$(shell go list -f '{{range .TestGoFiles}}{{ $$.Dir }}/{{.}} {{end}}' . | sed -e "s@$(PWD)/@@g" )
+## all non-test source files
+SOURCES:=$(shell go list -f '{{range .GoFiles}}{{ $$.Dir }}/{{.}} {{end}}' ./... | sed -e "s@$(PWD)/@@g" )
+TEST_SOURCES:=$(shell go list -f '{{range .TestGoFiles}}{{ $$.Dir }}/{{.}} {{end}}' . | sed -e "s@$(PWD)/@@g" )
+
+## all packages in this prject
+PACKAGES:=$(shell go list -f '{{.Name}}' ./... )
 
 .PHONY: all devtools deps test build clean rpm
 
@@ -35,7 +42,7 @@ $(GVP): | $(BIN)
 	chmod +x $@
 
 .godeps/.gpm_installed: $(GPM) $(GVP) $(GPM_LINK) Godeps
-	! test -l .godeps/src/$(IMPORT_PATH) && $(GVP) in $(GPM) link add $(IMPORT_PATH) $(PWD)
+	test -e .godeps/src/$(PKG_PATH) || $(GVP) in $(GPM) link add $(PKG_PATH) $(PWD)
 	$(GVP) in $(GPM) install
 	touch $@
 
@@ -54,8 +61,8 @@ devtools: $(BIN)/ginkgo $(BIN)/mockery
 deps: .godeps/.gpm_installed
 
 ## run tests
-test: $(BIN)/ginkgo $(TEST_SOURCES)
-	$(GVP) in $(BIN)/ginkgo
+test: $(BIN)/ginkgo
+	$(GVP) in $(BIN)/ginkgo $(PACKAGES)
 
 ## build the binary
 ## augh!  gvp shell escaping!!
@@ -64,6 +71,7 @@ stage/$(NAME): .godeps/.gpm_installed $(SOURCES) | stage
 	$(GVP) in go build -o $@ -ldflags '-X\ main.version\ $(VER)' -v .
 
 ## same, but shorter
+## @todo should run tests!
 build: stage/$(NAME)
 
 ## duh
